@@ -1,0 +1,127 @@
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: marketing-tech
+data:
+  default.conf: |
+    
+    log_format json_combined escape=json '{'
+                                      '"remote_addr":"$remote_addr",'
+                                      '"time_local":"$time_local",'
+                                      '"request":"$request",'
+                                      '"status":$status,'
+                                      '"body_bytes_sent":$body_bytes_sent,'
+                                      '"http_referer":"$http_referer",'
+                                      '"http_user_agent":"$http_user_agent",'
+                                      '"http_x_forwarded_for":"$http_x_forwarded_for",'
+                                      '"request_time":$request_time,'
+                                      '"upstream_response_time":"$upstream_response_time"'
+                                    '}';
+        access_log /var/log/nginx/access.log json_combined;
+    
+        # Define a zone for connection limiting
+        limit_conn_zone $binary_remote_addr zone=lambda_conn_limit:10m;
+    
+        # Define a zone for request rate limiting
+        limit_req_zone $binary_remote_addr zone=lambda_req_limit:10m rate=5r/s;
+
+        server {
+            listen 80;
+
+            limit_conn lambda_conn_limit 100;
+            location / {
+
+
+                limit_req zone=lambda_req_limit burst=1 delay=30;
+
+
+
+                proxy_pass https://2ypozmzsat3qefvg4aacdn2vxu0bhgfl.lambda-url.eu-west-1.on.aws;  
+                proxy_set_header Host 2ypozmzsat3qefvg4aacdn2vxu0bhgfl.lambda-url.eu-west-1.on.aws;
+                proxy_ssl_server_name off;  
+                proxy_connect_timeout 30s;
+                proxy_send_timeout 30s;
+                proxy_read_timeout 30s;
+
+                # Specify what happens when queuing fails
+                limit_req_status 503;
+            }
+        }
+
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: marketing-tech
+  labels:
+    app: nginx
+  annotations:
+    configMapVersion: "3"
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-config-volume
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: nginx-config-volume
+          configMap:
+            name: nginx-config
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: marketing-tech
+spec:
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  namespace: marketing-tech
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30s"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30s"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30s"
+spec:
+  ingressClassName: nginx-external
+  rules:
+    - host: marketing-tech-bad-airship.holidu.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-service
+                port:
+                  number: 80
