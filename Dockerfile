@@ -1,8 +1,8 @@
 # Use a base image that includes SSL libraries
-FROM golang:1.20-alpine as build
+FROM golang:1.23-alpine as build
 
 # Install OpenSSL and necessary libraries
-RUN apk --no-cache add openssl
+RUN apk --no-cache add build-base openssl-dev
 
 # Copy the Go application source code into the container
 COPY . /src
@@ -11,7 +11,7 @@ COPY . /src
 WORKDIR /src
 
 # Build the Go application
-RUN go build -o /main .
+RUN CGO_ENABLED=1 go build -o /main .
 
 # Create a minimal image with the built Go binary and SSL support
 FROM alpine:latest
